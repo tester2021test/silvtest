@@ -1,0 +1,58 @@
+name: Gold & Silver ETF Tracker
+
+on:
+  schedule:
+    # Every 5 minutes, Mon–Fri
+    # IST market hours = 03:45 UTC (09:15 IST) to 10:00 UTC (15:30 IST)
+    # Run slightly wider: 03:30–10:30 UTC to catch pre/post market
+    - cron: "*/5 3-10 * * 1-5"
+  workflow_dispatch:     # allow manual trigger from GitHub UI
+
+permissions:
+  contents: write        # needed to push CSV back to repo
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8   # kill if stuck (prevents runaway billing)
+
+    steps:
+      # ── 1. Checkout repo ────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Set up Python ────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install dependencies ─────────────────────────────────
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install yfinance pandas numpy pytz requests
+
+      # ── 4. Run tracker ──────────────────────────────────────────
+      - name: Run ETF tracker
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python tracker.py
+
+      # ── 5. Commit CSV back to repo ──────────────────────────────
+      - name: Commit updated CSV
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Only commit if data/history.csv actually changed
+          git add data/history.csv data/bt_cache.json || true
+          git diff --staged --quiet || git commit -m "data: update $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
